@@ -127,3 +127,24 @@ nn_model %>% compile(optimizer = "rmsprop", loss = "mse", metrics = "mae")
 history <- nn_model %>% 
   fit(as.matrix(train_data), train_targets, epochs = 80, 
       batch_size = 16, verbose = 0)
+
+# Creating predict function for the stacked model
+predict_stacked <- function(model_list, input_data) {
+  
+  stopifnot(is.list(model_list), 
+            names(model_list) == c("xgb", "nn", "meta_learner"),
+            is.data.frame(input_data))
+  
+  score_matrix <- as.matrix(input_data)
+  
+  # Individual model predictions
+  xgb_preds <- predict(model_list$xgb, as(score_matrix, "dgCMatrix"), type = "prob")
+  nn_preds <- predict(model_list$nn, score_matrix, type = "prob") %>% as.numeric()
+  
+  # Meta learner predictions
+  pred_df <- data.frame(xgb_preds = xgb_preds, nn_preds = nn_preds)
+  preds <- predict(model_list$meta_learner, pred_df)$prediction
+  
+  return(preds)
+}
+

@@ -104,3 +104,26 @@ meta_learner <- ranger(target ~ ., data = cv_preds,
                        mtry = 2, num.trees = 20, 
                        importance = "impurity")
 
+# Fitting base learners
+xgb_model <- xgboost(
+  data = as(as.matrix(train_data), "dgCMatrix"), 
+  label = train_targets,
+  objective = "reg:squarederror",
+  params = xgb_params, 
+  nrounds = 100,
+  verbose = 0)
+
+nn_model <- keras_model_sequential() %>%
+  layer_dense(units = nn_params$units[1], 
+              activation = nn_params$activation[1],
+              input_shape = dim(train_data)[[2]]
+  ) %>%
+  layer_dense(units = nn_params$units[2], 
+              activation = nn_params$activation[2]) %>% 
+  layer_dense(units = nn_params$units[3]) 
+
+nn_model %>% compile(optimizer = "rmsprop", loss = "mse", metrics = "mae")
+
+history <- nn_model %>% 
+  fit(as.matrix(train_data), train_targets, epochs = 80, 
+      batch_size = 16, verbose = 0)

@@ -148,3 +148,39 @@ predict_stacked <- function(model_list, input_data) {
   return(preds)
 }
 
+# Evaluation
+rmse <- function(preds, label){
+  sqrt(mean((preds - label)^2))
+}
+
+rmse(predict(xgb_model, as.matrix(test_data)), test_targets)
+rmse(as.numeric(predict(nn_model, as.matrix(test_data))), test_targets)
+rmse(predict_stacked(list(xgb = xgb_model, nn = nn_model, meta_learner = meta_learner),
+                     test_data), test_targets)
+
+rmse(predict(xgb_model, as.matrix(train_data)), train_targets)
+rmse(as.numeric(predict(nn_model, as.matrix(train_data))), train_targets)
+rmse(predict_stacked(list(xgb = xgb_model, nn = nn_model, meta_learner = meta_learner),
+                     train_data), train_targets)
+
+
+# explaining stacked model ----
+model_list <- list(xgb = xgb_model, nn = nn_model, meta_learner = meta_learner)
+
+stacked_explain <- DALEX::explain(model_list, 
+                                  train_data,
+                                  y = train_targets,
+                                  predict_function = predict_stacked,
+                                  label = "stacked model"
+)
+
+system.time(
+  shap_stacked_model <- predict_parts(
+    explainer = stacked_explain,
+    new_observation = test_data[1, ],
+    type = "shap",
+    B = 50)
+)
+
+plot(shap_stacked_model) %>% plotly::ggplotly()
+

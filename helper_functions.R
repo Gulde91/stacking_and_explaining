@@ -9,6 +9,10 @@ rmse <- function(preds, label){
 
 cv_base_learners_preds <- function(df_train, target, cv_folds = 5, cv_index, model_params) {
   
+  stopifnot(is.data.frame(df_train), is.numeric(target), is.numeric(cv_folds),
+            is.factor(cv_index), is.list(model_params), 
+            names(model_params) %in% c("xgb_params", "nn_params"))
+  
   cv_preds <- list()
   
   for (i in 1:cv_folds) {
@@ -25,8 +29,8 @@ cv_base_learners_preds <- function(df_train, target, cv_folds = 5, cv_index, mod
       data = as(cv_train, "dgCMatrix"), 
       label = cv_train_target,
       objective = "reg:squarederror",
-      params = model_params$xgb_params, 
-      nrounds = 100,
+      params = model_params$xgb_params$params, 
+      nrounds = model_params$xgb_params$nround,
       nthread = 1,
       verbose = 0)
     
@@ -34,12 +38,12 @@ cv_base_learners_preds <- function(df_train, target, cv_folds = 5, cv_index, mod
     nn_params <- model_params$nn_params
     
     cv_nn_model <- keras_model_sequential() %>%
-      layer_dense(units = nn_params$units[1], 
-                  activation = nn_params$activation[1],
-                  input_shape = dim(train_data)[[2]]) %>%
-      layer_dense(units = nn_params$units[2], 
-                  activation = nn_params$activation[2]) %>% 
-      layer_dense(units = nn_params$units[3])
+      layer_dense(units = nn_params$units_l1,
+                  activation = "relu",
+                  input_shape = dim(cv_train)[[2]]) %>%
+      layer_dense(units = nn_params$units_l2, 
+                  activation = "relu") %>% 
+      layer_dense(units = 1)
     
     cv_nn_model %>% compile(
       optimizer = "rmsprop",
@@ -56,8 +60,9 @@ cv_base_learners_preds <- function(df_train, target, cv_folds = 5, cv_index, mod
     
     cv_preds[[i]] <- list(target = cv_val_target,
                           xgb_preds = cv_xgb_preds,
-                          nn_preds = cv_nn_preds,
-                          cv_index = i)
+                          nn_preds = cv_nn_preds#,
+                          #cv_index = i
+                          )
     
   }
   
@@ -67,34 +72,33 @@ cv_base_learners_preds <- function(df_train, target, cv_folds = 5, cv_index, mod
 }
 
 cv_bayes <- function(eta, max_depth, subsample, colsample_bytree, min_child_weight,
-                     scale_pos_weight, gamma, lambda, alpha,
+                     scale_pos_weight, gamma, lambda, alpha, nround,
                      units_l1, units_l2) {
   
   # Defining base learners parameters
-  xgb_params <- list(eta = eta, 
-                     max_depth = max_depth, 
-                     subsample = subsample, 
-                     min_child_weight = min_child_weight, 
-                     colsample_bytree = colsample_bytree, 
-                     scale_pos_weight = scale_pos_weight, 
-                     gamma = gamma, 
-                     lambda = lambda, 
-                     alpha = alpha
-                     )
+  xgb_params <- list(
+    params = list(eta = eta, 
+                  max_depth = max_depth, 
+                  subsample = subsample, 
+                  min_child_weight = min_child_weight, 
+                  colsample_bytree = colsample_bytree, 
+                  scale_pos_weight = scale_pos_weight, 
+                  gamma = gamma, 
+                  lambda = lambda, 
+                  alpha = alpha
+                  ),
+    nround = nround)
   
   nn_params <- list(
-    units = c(units_l1, units_l2, 1),
-    input_shape = dim(train_shuffled)[[2]],
-    activation = c("relu", "relu")
+    units_l1 = units_l1,
+    units_l2 = units_l2
   )
   
   # Cross validation base learners
-  system.time(
   cv_preds <- cv_base_learners_preds(train_shuffled, train_targets_shuffled, 
                                      cv_folds, cv_index,
                                      list(xgb_params = xgb_params, 
                                           nn_params = nn_params))
-  )
   # Cross validation meta learner
   rmse_result <- numeric()
   
@@ -117,4 +121,24 @@ cv_bayes <- function(eta, max_depth, subsample, colsample_bytree, min_child_weig
   )
   
   return(output)
+}
+
+# Creating predict function for the stacked model
+predict_stacked <- function(model_list, input_data) {
+  
+  stopifnot(is.list(model_list), 
+            names(model_list) == c("xgb", "nn", "meta_learner"),
+            is.data.frame(input_data))
+  
+  score_matrix <- as.matrix(input_data)
+  
+  # Individual model predictions
+  xgb_preds <- predict(model_list$xgb, as(score_matrix, "dgCMatrix"), type = "prob")
+  nn_preds <- predict(model_list$nn, score_matrix, type = "prob") %>% as.numeric()
+  
+  # Meta learner predictions
+  pred_df <- data.frame(xgb_preds = xgb_preds, nn_preds = nn_preds)
+  preds <- predict(model_list$meta_learner, pred_df)$prediction
+  
+  return(preds)
 }

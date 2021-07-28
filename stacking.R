@@ -49,22 +49,39 @@ bounds <- list(eta = c(0.01, 0.5),
                alpha = c(0, 4),
                nround = c(10L, 100L),
                units_l1 = c(8L, 128L),
-               units_l2 = c(8L, 128L)
+               units_l2 = c(8L, 128L),
+               mtry = c(1L, 2L),
+               num_trees = c(2L, 50L)
                )
 
 # Tuning (stacked) model with bayes optimization ----
+library(doParallel)
+library(parallel)
+
+cl <- makeCluster(8)
+registerDoParallel(cl)
+
+clusterExport(cl, envir = environment(), 
+              c("cv_base_learners_preds", "train_shuffled", "train_targets_shuffled",
+                "cv_folds", "cv_index", "%>%", "xgboost", "layer_dense", 
+                "keras_model_sequential", "compile", "fit", "bind_rows", 
+                "ranger", "rmse")
+              )
+
 system.time(
 bayesres <- bayesOpt(FUN = cv_bayes, # scorefunction to optimize
                      bounds = bounds,
-                     initPoints = 13,
-                     iters.n = 1,
-                     iters.k = 1,
+                     initPoints = 80,
+                     iters.n = 32,
+                     iters.k = 4,
                      acq = "ei",
                      gsPoints = 100,
-                     parallel = FALSE,
+                     parallel = TRUE,
                      otherHalting = list(minUtility = 0.005, timeLimit = 60*60*30),
                      verbose = 2)
 )
+
+stopCluster(cl); rm(cl)
 
 opt_xgb_params <- bayesres$scoreSummary[
   which.max(bayesres$scoreSummary$Score), 
@@ -77,6 +94,9 @@ opt_xgb_nround <- bayesres$scoreSummary[which.max(bayesres$scoreSummary$Score),
 
 opt_nn_params <- bayesres$scoreSummary[which.max(bayesres$scoreSummary$Score), 
                                        c("units_l1", "units_l2")] %>% as.list()
+
+opt_rf_params <- bayesres$scoreSummary[which.max(bayesres$scoreSummary$Score), 
+                                       c("mtry", "num_trees")] %>% as.list()
 
 # Training base learners with optimal parameters ----
 system.time(
@@ -119,7 +139,7 @@ base_learners_preds <- cv_base_learners_preds(
 tictoc::toc()
 
 meta_learner <- ranger(target ~ ., data = base_learners_preds,
-                       mtry = 2, num.trees = 20, 
+                       mtry = opt_rf_params$mtry, num.trees = opt_rf_params$num_trees, 
                        importance = "impurity",
                        num.threads = 1)
 

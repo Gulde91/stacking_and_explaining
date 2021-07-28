@@ -73,7 +73,7 @@ cv_base_learners_preds <- function(df_train, target, cv_folds = 5, cv_index, mod
 
 cv_bayes <- function(eta, max_depth, subsample, colsample_bytree, min_child_weight,
                      scale_pos_weight, gamma, lambda, alpha, nround,
-                     units_l1, units_l2) {
+                     units_l1, units_l2, mtry, num_trees) {
   
   # Defining base learners parameters
   xgb_params <- list(
@@ -108,9 +108,9 @@ cv_bayes <- function(eta, max_depth, subsample, colsample_bytree, min_child_weig
     rf_val_data <- cv_preds[cv_index == i, c("xgb_preds", "nn_preds")]
     
     cv_rf_model <- ranger(target ~ ., data = rf_train_data,
-                          mtry = 2, num.trees = 20, 
+                          mtry = mtry, num.trees = num_trees,
                           importance = "impurity",
-                          num.threads = 2)
+                          num.threads = 1)
     
     rf_preds <- predict(cv_rf_model, rf_val_data)$prediction
     rmse_result[i] <- rmse(rf_preds, cv_preds$target[cv_index == i])    

@@ -9,6 +9,10 @@ library(xgboost)
 library(DALEXtra)
 library(dplyr)
 library(ranger)
+library(ParBayesianOptimization)
+
+# Sourcing helper-functions
+source("./helper_functions.R")
 
 # Getting data ----
 dataset <- dataset_boston_housing()
@@ -25,14 +29,53 @@ test_data <- as.data.frame(test_data)
 train_targets <- as.numeric(train_targets)
 test_targets <- as.numeric(test_targets)
 
-# Creating stacked model ----
+# Resampling data and creating cv folds
 reshuffel <- sample(1:nrow(train_data))
-train_data_shuffled <- train_data[reshuffel, ]
+train_shuffled <- train_data[reshuffel, ]
 train_targets_shuffled <- train_targets[reshuffel]
 
 cv_folds <- 5
-cv_index <- cut(1:nrow(train_data_shuffled), cv_folds, labels = 1:cv_folds)
+cv_index <- cut(1:nrow(train_data), cv_folds, labels = 1:cv_folds)
 
+# Creating parameters bound for tuning
+bounds <- list(eta = c(0.01, 0.5),
+               max_depth = c(2L, 8L),
+               subsample = c(0.3, 0.8),
+               min_child_weight = c(0, 10), 
+               colsample_bytree = c(0.1, 1), 
+               scale_pos_weight = c(0L, 10L),
+               gamma = c(0, 5), 
+               lambda = c(0, 4), 
+               alpha = c(0, 4),
+               units_l1 = c(1L, 64L),
+               units_l2 = c(1L, 64L)
+               )
+
+# Tuning (stacked) model with bayes optimization 
+system.time(
+bayesres <- bayesOpt(FUN = cv_bayes, # scorefunction to optimize
+                     bounds = bounds,
+                     initPoints = 12,
+                     iters.n = 1,
+                     iters.k = 1,
+                     acq = "ei",
+                     gsPoints = 10,
+                     parallel = FALSE,
+                     otherHalting = list(minUtility = 0.005, timeLimit = 60*60*30),
+                     verbose = 2)
+)
+bayesres$scoreSummary
+
+opt_xgb_params <- bayesres$scoreSummary[which.max(bayesres$scoreSummary$Score), 
+                                        c("eta", "max_depth", "subsample", 
+                                          "min_child_weight", "colsample_bytree", 
+                                          "scale_pos_weight", "gamma", "lambda", "alpha")]
+
+opt_nn_params <- bayesres$scoreSummary[which.max(bayesres$scoreSummary$Score), 
+                                        c("units_l1", "units_l2")]
+
+
+# Creating stacked model ----
 xgb_params <- list(
   eta = 0.05,
   max_depth = 4,
@@ -117,7 +160,7 @@ nn_model <- keras_model_sequential() %>%
   layer_dense(units = nn_params$units[1], 
               activation = nn_params$activation[1],
               input_shape = dim(train_data)[[2]]
-  ) %>%
+             ) %>%
   layer_dense(units = nn_params$units[2], 
               activation = nn_params$activation[2]) %>% 
   layer_dense(units = nn_params$units[3]) 
@@ -149,10 +192,6 @@ predict_stacked <- function(model_list, input_data) {
 }
 
 # Evaluation
-rmse <- function(preds, label){
-  sqrt(mean((preds - label)^2))
-}
-
 rmse(predict(xgb_model, as.matrix(test_data)), test_targets)
 rmse(as.numeric(predict(nn_model, as.matrix(test_data))), test_targets)
 rmse(predict_stacked(list(xgb = xgb_model, nn = nn_model, meta_learner = meta_learner),
@@ -179,7 +218,7 @@ system.time(
     explainer = stacked_explain,
     new_observation = test_data[1, ],
     type = "shap",
-    B = 50)
+    B = 20)
 )
 
 plot(shap_stacked_model) %>% plotly::ggplotly()

@@ -15,7 +15,7 @@ cv_base_learners_preds <- function(df_train, target, cv_folds = 5, cv_index, mod
   
   cv_preds <- list()
   
-  for (i in 1:cv_folds) {
+  for (i in seq(cv_folds)) {
     
     # Defining train and validation data
     cv_val <- df_train[cv_index == i, ] %>% as.matrix()
@@ -102,7 +102,7 @@ cv_bayes <- function(eta, max_depth, subsample, colsample_bytree, min_child_weig
   # Cross validation meta learner
   rmse_result <- numeric()
   
-  for (i in 1:cv_folds) {
+  for (i in seq(cv_folds)) {
     
     rf_train_data <- cv_preds[cv_index != i, ]
     rf_val_data <- cv_preds[cv_index == i, c("xgb_preds", "nn_preds")]

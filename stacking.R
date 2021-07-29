@@ -1,5 +1,5 @@
 # Creating a stacked model on the boston house dataset
-# with xgboost and NN (keras) as meta learners and RF
+# with xgboost and NN (keras) as base learners and RF
 # as meta learner. Explaining single instance predictions
 # through Shap values (with the DALEX package)
 
